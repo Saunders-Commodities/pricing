@@ -6,7 +6,7 @@ from typing import Optional
 import asyncio
 import re
 
-app = FastAPI(title="ULSD Futures Price API", version="1.0.0")
+app = FastAPI(title="Commodity Pricing API", version="2.0.0")
 
 # Add CORS middleware to allow web page requests
 app.add_middleware(
@@ -17,8 +17,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Cache storage
+# Cache storage for ULSD
 price_cache = {
+    "data": None,
+    "timestamp": None,
+    "expiry_minutes": 60  # 1 hour cache
+}
+
+# Cache storage for Gold
+gold_cache = {
     "data": None,
     "timestamp": None,
     "expiry_minutes": 60  # 1 hour cache
@@ -121,14 +128,99 @@ async def get_cached_price() -> dict:
     }
 
 
+async def fetch_gold_price_from_bybit() -> dict:
+    """Fetch the current gold price from Bybit API."""
+    url = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=XAUTUSDT"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data.get("retCode") != 0:
+                raise ValueError(f"Bybit API error: {data.get('retMsg', 'Unknown error')}")
+
+            result = data.get("result", {}).get("list", [])
+            if not result:
+                raise ValueError("No data returned from Bybit API")
+
+            ticker = result[0]
+
+            last_price = float(ticker.get("lastPrice", 0))
+            price_24h_pcnt = float(ticker.get("price24hPcnt", 0)) * 100  # Convert to percentage
+            bid_price = float(ticker.get("bid1Price", 0))
+            ask_price = float(ticker.get("ask1Price", 0))
+            volume_24h = float(ticker.get("volume24h", 0))
+            turnover_24h = float(ticker.get("turnover24h", 0))
+
+            return {
+                "symbol": "XAUTUSDT",
+                "name": "Gold (Tether Gold) Perpetual",
+                "exchange": "Bybit",
+                "price": last_price,
+                "currency": "USDT",
+                "change_percent": round(price_24h_pcnt, 4),
+                "bid_price": bid_price,
+                "ask_price": ask_price,
+                "volume_24h": volume_24h,
+                "turnover_24h_usdt": turnover_24h,
+                "last_updated": datetime.utcnow().isoformat(),
+                "source": "Bybit API"
+            }
+
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=503, detail=f"Failed to fetch gold price: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing gold price data: {str(e)}")
+
+
+def is_gold_cache_valid() -> bool:
+    """Check if the cached gold data is still valid."""
+    if gold_cache["data"] is None or gold_cache["timestamp"] is None:
+        return False
+
+    expiry_time = gold_cache["timestamp"] + timedelta(minutes=gold_cache["expiry_minutes"])
+    return datetime.utcnow() < expiry_time
+
+
+async def get_cached_gold_price() -> dict:
+    """Get gold price from cache or fetch new data if cache is expired."""
+    if is_gold_cache_valid():
+        return {
+            **gold_cache["data"],
+            "cached": True,
+            "cache_expires_at": (
+                gold_cache["timestamp"] + timedelta(minutes=gold_cache["expiry_minutes"])
+            ).isoformat()
+        }
+
+    # Cache is invalid, fetch new data
+    fresh_data = await fetch_gold_price_from_bybit()
+
+    # Update cache
+    gold_cache["data"] = fresh_data
+    gold_cache["timestamp"] = datetime.utcnow()
+
+    return {
+        **fresh_data,
+        "cached": False,
+        "cache_expires_at": (
+            gold_cache["timestamp"] + timedelta(minutes=gold_cache["expiry_minutes"])
+        ).isoformat()
+    }
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
     return {
-        "message": "ULSD Futures Price API",
-        "version": "1.0.0",
+        "message": "Commodity Pricing API",
+        "version": "2.0.0",
         "endpoints": {
             "/price": "Get current ULSD futures price (cached for 1 hour)",
+            "/goldprice": "Get current gold price from Bybit (cached for 1 hour)",
             "/health": "Health check endpoint"
         }
     }
@@ -143,13 +235,23 @@ async def get_price():
     return await get_cached_price()
 
 
+@app.get("/goldprice")
+async def get_gold_price():
+    """
+    Get the current gold price from Bybit.
+    Results are cached for 1 hour to avoid overloading the API.
+    """
+    return await get_cached_gold_price()
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "cache_status": "valid" if is_cache_valid() else "expired"
+        "ulsd_cache_status": "valid" if is_cache_valid() else "expired",
+        "gold_cache_status": "valid" if is_gold_cache_valid() else "expired"
     }
 
 
