@@ -155,6 +155,11 @@ async def fetch_gold_price_from_bybit() -> dict:
             volume_24h = float(ticker.get("volume24h", 0))
             turnover_24h = float(ticker.get("turnover24h", 0))
 
+            # Get the timestamp from Bybit API (in milliseconds)
+            price_timestamp_ms = int(ticker.get("time", 0))
+            # Convert milliseconds to seconds and create datetime
+            price_datetime = datetime.utcfromtimestamp(price_timestamp_ms / 1000) if price_timestamp_ms else datetime.utcnow()
+
             return {
                 "symbol": "XAUTUSDT",
                 "name": "Gold (Tether Gold) Perpetual",
@@ -166,6 +171,7 @@ async def fetch_gold_price_from_bybit() -> dict:
                 "ask_price": ask_price,
                 "volume_24h": volume_24h,
                 "turnover_24h_usdt": turnover_24h,
+                "price_date": price_datetime.isoformat(),
                 "last_updated": datetime.utcnow().isoformat(),
                 "source": "Bybit API"
             }
