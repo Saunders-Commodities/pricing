@@ -1,0 +1,16 @@
+[Unit]
+Description=ULSD Futures Price API
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/michaelsaunders/Documents/python-apis
+ExecStart=/usr/bin/sg docker -c "/usr/local/bin/docker-compose up -d"
+ExecStop=/usr/bin/sg docker -c "/usr/local/bin/docker-compose down"
+User=michaelsaunders
+Group=michaelsaunders
+
+[Install]
+WantedBy=multi-user.target

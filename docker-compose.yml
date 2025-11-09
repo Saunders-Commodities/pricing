@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  ulsd-price-api:
+    build: .
+    container_name: ulsd-price-api
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
